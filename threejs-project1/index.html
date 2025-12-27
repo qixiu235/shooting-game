@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数字方块射击游戏</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      background: #000;
+      touch-action: none;
+    }
+    #info {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      color: white;
+      font-size: 20px;
+      text-shadow: 0 0 5px black;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* 游戏规则面板 */
+    #rules {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 90%;
+      max-width: 600px;
+      background: rgba(0, 0, 0, 0.75);
+      color: white;
+      padding: 24px;
+      border-radius: 16px;
+      font-size: 16px;
+      line-height: 1.6;
+      text-align: left;
+      z-index: 15;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+    }
+
+    #rules h2 {
+      margin-top: 0;
+      font-size: 24px;
+      text-align: center;
+      color: #ffcc00;
+      margin-bottom: 16px;
+    }
+
+    #rules p {
+      margin: 12px 0;
+    }
+
+    #rules strong {
+      color: #4fc3f7;
+    }
+
+    /* 开始游戏按钮 */
+    #start-btn {
+      position: absolute;
+      top: calc(50% + 180px);
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 14px 36px;
+      font-size: 24px;
+      background: #ff4081;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      z-index: 20;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    #start-btn:hover {
+      background: #e91e63;
+    }
+
+    /* 重新开始按钮 */
+    #restart-btn {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 16px 40px;
+      font-size: 28px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      display: none;
+      z-index: 20;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    #restart-btn:hover {
+      background: #45a049;
+    }
+
+    /* 背景暗化遮罩 */
+    #background-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <!-- 顶部得分 -->
+  <div id="info">得分: <span id="score">0</span></div>
+
+  <!-- 游戏规则说明 -->
+  <div id="rules">
+    <h2>🎮《数字方块射击》游戏规则</h2>
+    <p><strong>🧩 游戏目标</strong><br>
+       击中不断靠近的彩色数字方块，获取高分！<br>
+       在方块到达你面前之前，用鼠标（或触摸屏）点击它们，将数字累加为你的得分。坚持越久，得分越高！</p>
+
+    <p><strong>🕹️ 操作方式</strong><br>
+       • <strong>PC 端</strong>：移动鼠标对准方块，单击左键进行射击。<br>
+       • <strong>手机/平板</strong>：点击屏幕上的方块即可射击。<br>
+       💡 提示：每次击中一个方块，会获得该方块上显示的数字分数！</p>
+
+    <p><strong>⚠️ 游戏结束条件</strong><br>
+       任意一个方块到达玩家位置（即穿过屏幕前方），游戏立即结束。<br>
+       此时会显示你的最终得分，并弹出【重新开始】按钮。</p>
+  </div>
+
+  <!-- 按钮 -->
+  <button id="start-btn">开始游戏</button>
+  <button id="restart-btn">重新开始</button>
+  <div id="background-overlay"></div>
+
+  <!-- 引入 Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <script>
+    // ======================
+    // 全局变量
+    // ======================
+    let scene, camera, renderer, score = 0;
+    let blocks = [];
+    let explosions = [];
+    let audioContext;
+    let gameActive = false;
+
+    const startBtn = document.getElementById('start-btn');
+    const restartBtn = document.getElementById('restart-btn');
+    const rulesPanel = document.getElementById('rules');
+
+    // ======================
+    // 音效系统
+    // ======================
+    function initAudio() {
+      if (!audioContext) {
+        try {
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {
+          console.warn("Web Audio not supported");
+        }
+      }
+    }
+
+    function playHitSound() {
+      if (!audioContext) return;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(400, audioContext.currentTime + 0.2);
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.2);
+    }
+
+    // ======================
+    // 粒子爆炸特效
+    // ======================
+    function createExplosion(position, color) {
+      const particleCount = 20;
+      const particles = new THREE.Group();
+      for (let i = 0; i < particleCount; i++) {
+        const geometry = new THREE.SphereGeometry(0.05, 8, 8);
+        const material = new THREE.MeshBasicMaterial({
+          color: color,
+          transparent: true,
+          opacity: 0.8
+        });
+        const particle = new THREE.Mesh(geometry, material);
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 0.5 + Math.random() * 1.0;
+        particle.userData.velocity = new THREE.Vector3(
+          Math.cos(angle) * speed,
+          (Math.random() - 0.3) * speed,
+          Math.sin(angle) * speed
+        );
+        particle.userData.life = 1.0;
+        particle.position.copy(position);
+        particles.add(particle);
+      }
+      scene.add(particles);
+      explosions.push(particles);
+    }
+
+    // ======================
+    // 更新得分（关键修复）
+    // ======================
+    function updateScore(value) {
+      score += value;
+      document.getElementById('info').innerHTML = `得分: <span id="score">${score}</span>`;
+    }
+
+    // ======================
+    // 初始化场景
+    // ======================
+    function initScene() {
+      scene = new THREE.Scene();
+
+      // 背景：白色网格
+      const textureLoader = new THREE.TextureLoader();
+      const bgTexture = textureLoader.load('./img/white-grid.jpeg', () => {
+        scene.background = bgTexture;
+      });
+
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 2, 5);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      document.body.appendChild(renderer.domElement);
+
+      // 光照
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(5, 10, 7);
+      scene.add(dirLight);
+
+      // 地面：粉色网格
+      const groundTexture = textureLoader.load('./img/pink-grid.jpg');
+      groundTexture.wrapS = THREE.RepeatWrapping;
+      groundTexture.wrapT = THREE.RepeatWrapping;
+      groundTexture.repeat.set(4, 4);
+
+      const groundGeo = new THREE.PlaneGeometry(40, 40);
+      const groundMat = new THREE.MeshStandardMaterial({
+        map: groundTexture,
+        side: THREE.DoubleSide
+      });
+      const ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.y = -2;
+      scene.add(ground);
+
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    // ======================
+    // 生成方块
+    // ======================
+    function spawnBlocks(count) {
+      const geometry = new THREE.BoxGeometry(1, 1, 1);
+      for (let i = 0; i < count; i++) {
+        const hue = Math.random();
+        const material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color().setHSL(hue, 0.8, 0.6)
+        });
+        const block = new THREE.Mesh(geometry, material);
+        block.position.set(
+          (Math.random() - 0.5) * 20,
+          0.5 + Math.random() * 2,
+          -5 - Math.random() * 15
+        );
+        block.userData.number = Math.floor(Math.random() * 9) + 1;
+        scene.add(block);
+        blocks.push(block);
+      }
+    }
+
+    // ======================
+    // 射击逻辑
+    // ======================
+    function onShoot(event) {
+      if (!gameActive) return;
+
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(blocks);
+
+      if (intersects.length > 0) {
+        const hitBlock = intersects[0].object;
+        updateScore(hitBlock.userData.number);
+        playHitSound();
+        createExplosion(hitBlock.position.clone(), hitBlock.material.color.clone());
+        scene.remove(hitBlock);
+        blocks.splice(blocks.indexOf(hitBlock), 1);
+        if (blocks.length === 0) {
+          spawnBlocks(5 + Math.floor(score / 20));
+        }
+      }
+    }
+
+    // ======================
+    // 窗口缩放
+    // ======================
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // ======================
+    // 动画循环
+    // ======================
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (!gameActive) return;
+
+      // 更新粒子
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const group = explosions[i];
+        let alive = false;
+        group.children.forEach(particle => {
+          if (particle.userData.life > 0) {
+            particle.position.add(particle.userData.velocity);
+            particle.userData.velocity.y -= 0.02;
+            particle.userData.life -= 0.02;
+            particle.material.opacity = particle.userData.life;
+            alive = true;
+          }
+        });
+        if (!alive) {
+          scene.remove(group);
+          explosions.splice(i, 1);
+        }
+      }
+
+      // 方块移动 & 游戏结束检测
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        const block = blocks[i];
+        block.position.z += 0.008;
+        block.rotation.y += 0.01;
+        if (block.position.z > -2) {
+          endGame();
+          break;
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // ======================
+    // 游戏结束
+    // ======================
+    function endGame() {
+      gameActive = false;
+      document.getElementById('info').textContent = `游戏结束! 最终得分: ${score}`;
+      restartBtn.style.display = 'block';
+    }
+
+    // ======================
+    // 重置游戏状态
+    // ======================
+    function resetGame() {
+      // 清理场景
+      blocks.forEach(block => scene.remove(block));
+      explosions.forEach(group => scene.remove(group));
+      blocks = [];
+      explosions = [];
+      score = 0;
+
+      // 重置 UI
+      document.getElementById('info').innerHTML = `得分: <span id="score">0</span>`;
+      restartBtn.style.display = 'none';
+      startBtn.style.display = 'block';
+      rulesPanel.style.display = 'block'; // 显示规则
+      gameActive = false;
+    }
+
+    // ======================
+    // 开始游戏
+    // ======================
+    function startGame() {
+      resetGame(); // 确保干净状态
+      gameActive = true;
+      startBtn.style.display = 'none';
+      rulesPanel.style.display = 'none'; // 隐藏规则
+      spawnBlocks(5);
+    }
+
+    // ======================
+    // 事件绑定
+    // ======================
+    startBtn.addEventListener('click', () => {
+      initAudio();
+      startGame();
+    });
+
+    restartBtn.addEventListener('click', () => {
+      initAudio();
+      startGame();
+    });
+
+    window.addEventListener('pointerdown', onShoot);
+
+    // 启动场景
+    initScene();
+    animate();
+  </script>
+</body>
+</html>
